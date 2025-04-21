@@ -1,0 +1,377 @@
+%THSP pixels indexed based on activity images after dynamic specular reflection
+%removal
+clear;
+clc;
+close all
+s=1; 
+p1=input('Input percentage of pixels for creating THSP'); 
+store=1; 
+activity=3; %input('Input activity image type 1. Coefvar 2. Fuji 3. GD');
+spec=1; %input('1 if specular 2 if not specular'); % select 1 if there is visually evident specular highlights
+ 
+tic
+eventvideo=VideoReader('1.avi');
+F=eventvideo.NumFrames;
+ for k=1:eventvideo.NumFrames
+    hasFrame(eventvideo)
+    I=readFrame(eventvideo);                       
+    I_hsv=rgb2hsv(I);
+    I_S=I_hsv(:,:,2);
+    I_V=I_hsv(:,:,3);
+    I_lab=rgb2lab(I); 
+    I_L=I_lab(:,:,1);
+    while k<2
+        [m,n,crgb]=size(I);
+        I_S1=zeros(m,n);
+        
+I_R=I(:,:,1);
+I_G=I(:,:,2);
+I_B=I(:,:,3);
+meanimage=double(zeros(m,n));
+gdimage=double(zeros(m,n));
+Fujiimage=double(zeros(m,n));
+stdimage=double(zeros(m,n));
+coefvarimage=double(zeros(m,n));
+newroi=double(zeros(m,n));
+%illumpca
+colour=illumpca(I);
+
+%COLOUR
+for ii=1:3
+if colour(ii)==max(colour)
+   laser=ii;
+   break
+end
+
+end
+   
+   [countsR,xR]=imhist(I_R);
+   [countsG,xG]=imhist(I_G); 
+   [countsB,xB]=imhist(I_B);
+   
+if laser==1
+    disp('Illuminating source lies within Red region of visible light');
+    Rthresh=0;
+    Gthresh=otsuthresh(countsG);
+    Bthresh=otsuthresh(countsB);
+elseif laser==2
+disp('Illuminating source lies within Green region of visible light');
+    Rthresh=otsuthresh(countsR);
+    Gthresh=0;
+    Bthresh=otsuthresh(countsB);
+else
+    disp('Illuminating source lies within Blue region of visible light');
+    Rthresh=otsuthresh(countsR);
+    Gthresh=otsuthresh(countsG);
+    Bthresh=0;
+end
+    R1=imbinarize(I_R,Rthresh);   
+    G1=imbinarize(I_G,Gthresh); 
+    B1=imbinarize(I_B,Bthresh); 
+   % thrsholding assuming that specular pixels is lesser than total are
+    figure(1)
+    subplot(3,3,1)
+    imshow(R1)
+    title('Red Mask')
+    subplot(3,3,2)
+    imshow(G1)
+    title('Green Mask')
+    subplot(3,3,3)
+    imshow(B1)
+    title('Blue Mask')
+    
+    rgb=(R1.*G1).*B1;  
+    count=nnz(rgb);
+    disp('Percentage of specular pixels from rgb domain=')
+    disp(count/numel(rgb(rgb>0)))
+    if count==0
+        disp('No specular pixels')
+        I2=zeros(m,n); % I2 is the saturation matrix with non zero pixels at positions were RGB is also non zero
+    else 
+        
+        I2=rgb.*I_S; %RGB masked saturation matrix
+ end
+    %the saturation values at pixels with significant RGB presence are
+    %noted and its maximum will serve as the Sthresh 
+    Sthresh=max(max(I2));
+     break
+    end
+%Specular mask  
+ I_specular=imbinarize(I_L,0)-imbinarize(I_S,Sthresh); 
+ I_Smask=I_S1+I_specular;
+ I_S1=I_Smask;
+ lsp=max(max(I_Smask)); %Longest specular presence
+ I_GS=imbinarize(I_Smask,0.9*lsp); %global saturation mask
+%Mean
+
+imgray=double(mat2gray(I));
+meanimage=meanimage+imgray./F;
+
+ if store==1
+    imwrite(imgray,strcat('frame',num2str(k),'.jpg'))
+ end
+ end
+ 
+% [x,y]=size(I_Smask);
+% X=1:x;
+% Y=1:y;
+% [xx,yy]=meshgrid(Y,X);
+% ismask=im2double(I_Smask);
+% figure(2);
+% mesh(xx,yy,ismask);
+% colorbar
+figure(3);
+subplot(3,1,1)
+imshow(I_GS)
+title('Global specular mask')    
+subplot(3,1,2)
+imshow(I)
+title('frame')
+subplot(3,1,3)
+imshow(imbinarize(I_V,0).*xor(ones(m,n),I_GS))
+title('Diffuse region')
+
+
+
+% Activity image masks - gd, fuji, std, coefvar
+% for l=2:F
+%  imagea=(imread(strcat('frame',num2str(l-1),'.jpg')));
+%  image1=double(rgb2gray(imagea));
+%  imageb=(imread(strcat('frame',num2str(l),'.jpg')));
+%   image2=double(rgb2gray(imageb));  
+% end
+
+
+
+  for l=2:F
+ imagea=(imread(strcat('frame',num2str(l-1),'.jpg')));
+ imageb=(imread(strcat('frame',num2str(l),'.jpg')));
+ if spec==1
+ image1=(ones(m,n)-I_GS).*double(rgb2gray(imagea));
+  image2=(ones(m,n)-I_GS).*double(rgb2gray(imageb));
+ else
+    image1=double(rgb2gray(imagea));
+  image2=double(rgb2gray(imageb));
+ end
+ Fujiimage=(Fujiimage+((abs(image1-image2)./(image1+image2))));
+ stdimage=stdimage+(((image1-meanimage).^2)/F); 
+  end
+  
+ for k=1:F-1
+ imagea=(imread(strcat('frame',num2str(k),'.jpg')));
+ image1=(ones(m,n)-I_GS).*double(rgb2gray(imagea));
+ for l=k+1:F 
+ imageb=(imread(strcat('frame',num2str(l),'.jpg')));
+  image2=(ones(m,n)-I_GS).*double(rgb2gray(imageb));
+  gdimage=gdimage+abs(image1-image2);
+ end
+ end
+%removenan
+nanFuji=isnan(Fujiimage);
+
+
+
+for i=1:m
+    for j=1:n
+if meanimage(i,j)>0
+coefvarimage(i,j)=stdimage(i,j)./meanimage(i,j);
+else
+  coefvarimage(i,j)=0;  
+end
+if nanFuji(i,j)==1
+    Fujiimage(i,j)=0;
+end
+    end
+end
+coefvarimage(isnan(coefvarimage))=0;
+
+gdn=mean2(gdimage);
+fujin=mean2(Fujiimage);
+
+imwrite(gdimage,'gdimage.jpg');
+imwrite(Fujiimage,'Fujiimage.jpg');
+imwrite(coefvarimage,'Coefvarimage.jpg');
+
+%thresholding activity images
+if activity==1
+activityimage=coefvarimage;
+elseif activity==2
+activityimage=Fujiimage;
+else
+activityimage=gdimage;
+end
+
+%for p1=1:5:100
+activityarray=sort(reshape(activityimage,[1,m*n]),'descend');
+MI=zeros(5,10,5); 
+p=round(p1*m*n/100);
+if p>nnz(activityarray) 
+    threshactivity=activityarray(nnz(activityarray));
+else
+threshactivity=activityarray(p);  % p= sample population for new thsp. selecting pth largest element. all elements above this value will be equal or larger than pth element
+end
+%activitymask=wthresh(activityimage,'h',threshactivity); %hard threshold pixels above threshold allowed
+
+%threshold from otsu method from histogram
+if s==1
+
+[counts2,x]=imhist(meanimage,256);
+
+threshmean=otsuthresh(counts2);
+
+end
+%threshold from median
+if s==2
+    
+    threshmean=median(meanimage(meanimage>0),'all');
+     
+
+end
+if s==3
+    nonzero1=nnz(meanimage);
+    
+threshmean=mean2(meanimage)*(m*n)/nonzero1;
+
+end
+
+if s==4
+threshmean=mode(meanimage(meanimage>0));
+
+end
+
+%mean and activity mask
+
+meanmask=imbinarize(meanimage,threshmean);
+activitymask=imbinarize(activityimage,threshactivity);
+imwrite(uint8(meanmask),'meanmask.jpg');
+imwrite(uint8(activitymask),'activitymask.jpg')
+
+%newroi
+a=0;
+b=0;
+c=0;
+d=0;
+e=0;
+I_GS=zeros(m,n);
+for i=1:m
+    for j=1:n
+        if I_GS(i,j)==0 &&  activitymask(i,j)==1 
+            newroi(i,j)=1;
+            a=a+1;
+            activityarray1(a,:)=[i,j];                 %newROI
+            end
+           
+        if activitymask(i,j)==0 && I_GS(i,j)==0
+            newroi(i,j)=0.0;
+            b=b+1;
+            activityarray2(b,:)=[i,j];                  %shadow
+        end
+        
+        if I_GS(i,j)==1 && activitymask(i,j)==0
+            newroi(i,j)=0.5;
+            c=c+1;
+            activityarray3(c,:)=[i,j];                    %specular
+            end
+           if activitymask(i,j)==1 && I_GS(i,j)==1
+            newroi(i,j)=0.75;
+            d=d+1;
+            activityarray4(d,:)=[i,j];              %highly specular but active
+            end
+end
+end
+
+
+imwrite(newroi,'newroi.jpg');
+figure(4)
+imshow(newroi)
+title('New Region of Interest')
+colormap(jet);
+colorbar;
+
+% region wise IM calculation
+if a~=0
+A=zeros(a,l);
+else
+    A=zeros(m,n); %JUST AN EMPLTY MATRIX TO JUSTIFY FURTHER CODE
+end
+if b~=0
+B=zeros(b,l);
+else
+    B=zeros(m,n);
+end
+if c~=0
+C=zeros(c,l);
+else
+    C=zeros(m,n);
+end
+if d~=0
+D=zeros(d,l);
+else
+    D=zeros(m,n);
+end
+
+for k=1:l
+     image=imread(strcat('frame',num2str(k),'.jpg'));
+for i=1:a
+    ii=activityarray1(i,1);
+    jj=activityarray1(i,2);
+    A(i,k)=image(ii,jj);
+end
+for i=1:b
+    ii=activityarray2(i,1);
+    jj=activityarray2(i,2);
+    B(i,k)=image(ii,jj);
+end
+for i=1:c
+    ii=activityarray3(i,1);
+    jj= activityarray3(i,2);
+    C(i,k)=image(ii,jj);
+end
+for i=1:d
+    ii=activityarray4(i,1);
+    jj=activityarray4(i,2);
+    D(i,k)=image(ii,jj);
+end
+end
+
+
+%Co occurence matrix generation
+GLCM1=graycomatrix(A,'numlevel',255,'G',[]);
+GLCM2=graycomatrix(B,'numlevel',255,'G',[]);
+GLCM3=graycomatrix(C,'numlevel',255,'G',[]);
+GLCM4=graycomatrix(D,'numlevel',255,'G',[]);
+%Normalizing GLCM
+for k=1:255
+	MGLCM1(k,:)=GLCM1(k,:)/sum(GLCM1(k,:));
+	MGLCM2(k,:)=GLCM2(k,:)/sum(GLCM2(k,:));
+	MGLCM3(k,:)=GLCM3(k,:)/sum(GLCM3(k,:));
+	MGLCM4(k,:)=GLCM4(k,:)/sum(GLCM4(k,:));
+end
+% To remove NaN
+MGLCM1(isnan(MGLCM1))=0; 
+MGLCM2(isnan(MGLCM2))=0;
+MGLCM3(isnan(MGLCM3))=0;
+MGLCM4(isnan(MGLCM4))=0;
+imwrite (uint8(MGLCM1),'A_MGLCM1.jpg')
+imwrite (uint8(MGLCM2),'B_MGLCM1.jpg')
+imwrite (uint8(MGLCM3),'C_MGLCM1.jpg')
+imwrite (uint8(MGLCM4),'D_MGLCM1.jpg')
+[Aim,Bim,Cim,Dim,MI1,MI2,MI3,MI4]= deal(zeros(1));
+for mlevel=1:255
+  for nlevel=1:255
+            Aim=MGLCM1(mlevel,nlevel)*(mlevel-nlevel)^2;
+            Bim=MGLCM2(mlevel,nlevel)*(mlevel-nlevel)^2;
+            Cim=MGLCM3(mlevel,nlevel)*(mlevel-nlevel)^2;
+            Dim=MGLCM4(mlevel,nlevel)*(mlevel-nlevel)^2;
+             MI1=MI1+Aim;
+             MI2=MI2+Bim;
+             MI3=MI3+Cim;
+             MI4=MI4+Dim;
+          end
+end
+Maverage=(MI1+MI2+MI3+MI4)/4;
+MI=[MI1,MI2,MI3,MI4];
+toc
+
+ display(MI);
+ disp('NewROI (Red) ,Background (Blue)');
